@@ -4,11 +4,11 @@
 
 ## a) Build for jetson
 
-docker build -f Dockerfile_jetson_ros2  -t "doodlenet_ros2_jetson:Dockerfile_jetson_ros2" .
+docker build -f Dockerfile_jetson_ros2  -t "doodlenet_ros2:jetson" .
 
 ## a) Build for PC
 
-docker build -f Dockerfile_ros2 -t "doodlenet_ros2_jetson:Dockerfile_jetson_ros2" .
+docker build -f Dockerfile_ros2_pc -t "doodlenet_ros2:pc" .
 
 # 2) Run docker image
 
