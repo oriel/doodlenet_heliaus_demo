@@ -1,0 +1,331 @@
+import torch
+import torch.nn as nn
+from . import initialization as init
+
+import torch.nn.functional as F
+
+
+class SegmentationModel(torch.nn.Module):
+
+    def initialize(self):
+        init.initialize_decoder(self.decoder)
+        init.initialize_head(self.segmentation_head)
+        if self.classification_head is not None:
+            init.initialize_head(self.classification_head)
+
+    def forward(self, x):
+        """Sequentially pass `x` trough model`s encoder, decoder and heads"""
+        features = self.encoder(x)
+        decoder_output = self.decoder(*features)
+
+        masks = self.segmentation_head(decoder_output)
+
+        if self.classification_head is not None:
+            labels = self.classification_head(features[-1])
+            return masks, labels
+
+        return masks
+
+    def predict(self, x):
+        """Inference method. Switch model to `eval` mode, call `.forward(x)` with `torch.no_grad()`
+
+        Args:
+            x: 4D torch tensor with shape (batch_size, channels, height, width)
+
+        Return:
+            prediction: 4D torch tensor with shape (batch_size, classes, height, width)
+
+        """
+        if self.training:
+            self.eval()
+
+        with torch.no_grad():
+            x = self.forward(x)
+
+        return x
+
+#### modifications for rgb/thermal    
+import kornia.geometry.transform.thin_plate_spline as tps
+
+def interp_grid(src_grid, interp_size):
+    """
+    take grid in shape (B,H,W,2) and interpolate to shape (B,H_interp,W_interp,,2)
+    """
+    src_grid = src_grid.permute(0,3,1,2)
+    src_grid = F.interpolate(src_grid, size=interp_size, mode='bilinear', align_corners=True)
+    return src_grid.permute(0,2,3,1)           
+
+
+def get_identity_grid(height, width, batch_size):
+    """
+    generate an identity grid with shape (B,H,W,2) 
+    """
+    d1 = torch.linspace(-1, 1, height)
+    d2 = torch.linspace(-1, 1, width)
+    meshx, meshy = torch.meshgrid((d1, d2))
+    source_grid = torch.stack((meshy, meshx), 2)
+    source_grid = source_grid.unsqueeze(0)
+    source_grid = source_grid.repeat(batch_size,1,1,1)
+    source_points = source_grid.reshape((batch_size, height*width,2))
+    return source_grid
+
+
+def spline_reg_grid(pred_grid, test_data, device, h_small=3, w_small=4, warp_img=True):
+    pred_l_lwir = None
+
+    b, c, h, w = test_data.shape
+    if h == w:
+        w_small = 3
+    source_grid = get_identity_grid(h, w, b).to(device)
+    #h_small, w_small = 3,4
+    #pred_grid_small = pred_grid[:,:h_small, :w_small,:] # small number (< 15) of matching points for spline regression
+
+    pred_grid_small = interp_grid(pred_grid, (h_small, w_small)) # small number (< 15) of matching points for spline regression
+    pred_points_small = pred_grid_small.reshape((b, h_small*w_small, 2)).to(device)
+    source_grid_small = get_identity_grid(h_small, w_small, b).to(device)
+    source_points_small = source_grid_small.reshape((b, h_small*w_small, 2))
+
+    source_points = source_grid.reshape((b, h*w, 2))
+
+    try:
+
+        kernel_weights, affine_weights = tps.get_tps_transform(source_points_small, pred_points_small)
+        pred_points_tps = tps.warp_points_tps(source_points_small, pred_points_small, kernel_weights, affine_weights)
+        pred_grid_tps = pred_points_tps.reshape((b, h_small, w_small, 2))
+        pred_grid = interp_grid(pred_grid_tps, test_data.shape[2:])
+        if warp_img:
+            pred_l_lwir = F.grid_sample(test_data[:,:], pred_grid, mode='bilinear', align_corners=False)
+    except RuntimeError as e:
+        print("error, probably due to singular matrix")
+        pred_grid = interp_grid(pred_grid, test_data.shape[2:])
+        pass
+
+    return pred_grid, pred_l_lwir
+
+
+#### double encoder
+class SegmentationModelDoubleEncoder(torch.nn.Module):
+    def initialize(self):
+        init.initialize_decoder(self.decoder)
+        init.initialize_head(self.segmentation_head)
+        if self.classification_head is not None:
+            init.initialize_head(self.classification_head)
+
+    def forward(self, x):
+        """Sequentially pass `x` trough model`s encoder, decoder and heads"""
+
+        x_1 = x[:,:3] # rgb image
+        x_2 = x[:,3].unsqueeze(1).repeat(1,3,1,1) # thermal image
+
+        # concatenate deep features of two encoders
+        features_1 = self.encoder_1(x_1)
+        features_2 = self.encoder_2(x_2)
+
+        features = []
+
+        start_index = -3
+        #start_index = 0
+
+        #import pdb; pdb.set_trace()
+        
+        align_feats_homog = True
+        align_feats_spline = False
+
+        b = features_1[0].shape[0]
+
+        if align_feats_spline:
+
+            #import pdb; pdb.set_trace()
+            
+            feature_corr = self.fc(features_1[-1], features_2[-1])
+            theta = self.fr(feature_corr)
+            pred_grid = theta.view(b,2,3,2)
+            pred_grid, features_2[-4] = spline_reg_grid(pred_grid, features_2[-4], features_2[-1].get_device())
+            
+            
+            #pred_l_lwir = F.grid_sample(train_l_data[:,3].unsqueeze(1), pred_grid, mode='bilinear', align_corners=False)
+        
+        if self.correlation_weight:
+            import kornia.geometry as tgm
+            feature_corr_deep_1 = self.fc(features_1[-1], features_2[-1])
+            #feature_corr_shallow_1 = self.fc(features_1[-4], features_2[-4])
+
+            feature_corr_mean_1 = torch.mean(feature_corr_deep_1,axis=1)
+            #feature_corr_shallow_mean_1 = torch.mean(feature_corr_shallow_1,axis=1)
+
+            theta_deep = self.fw_deep(feature_corr_deep_1)
+            #theta_shallow = F.interpolate(theta_deep, size=features_2[-4].shape[2:], mode='bilinear', align_corners=True)
+            #import pdb; pdb.set_trace()
+            
+            
+            #### -- grid
+            # grid_h, grid_w = (4*30,4*40)
+            # gridY = torch.linspace(-1, 1, steps = grid_h).view(1, -1, 1, 1).expand(b, grid_h,  grid_w, 1)
+            # gridX = torch.linspace(-1, 1, steps = grid_w).view(1, 1, -1, 1).expand(b, grid_h,  grid_w, 1)
+            # grid = torch.cat((gridX, gridY), dim=3).cuda()
+            # warper = tgm.HomographyWarper(grid_h,  grid_w)
+            # warper.precompute_warp_grid(theta.view(b,3,3))
+            # features_2[-4] = warper(features_2[-4])
+
+        else:
+            theta_deep = 1
+
+            
+        ##
+
+        # featurecorr_deep_np_1 = feature_corr_mean_1[0].detach().cpu().numpy()
+        # #featurecorr_shallow_np_1 = feature_corr_shallow_mean_1[0].detach().cpu().numpy()
+            
+        # features_1_img = torch.mean(features_1[-4], axis=1)
+        # features_1_img_np = features_1_img[0].detach().cpu().numpy()
+        # features_2_img = torch.mean(features_2[-4], axis=1)
+        # features_2_img_np = features_2_img[0].detach().cpu().numpy()
+
+        # features_1_img_deep = torch.mean(features_1[-1], axis=1)
+        # features_1_img_np_deep = features_1_img_deep[0].detach().cpu().numpy()
+        # features_2_img_deep = torch.mean(features_2[-1], axis=1)
+        # features_2_img_np_deep = features_2_img_deep[0].detach().cpu().numpy()
+        
+        # import matplotlib.pyplot as plt
+        # plt.subplot(3,2,1)
+        # plt.imshow(features_1_img_np_deep,)
+        # plt.subplot(3,2,2)
+        # plt.imshow(features_2_img_np_deep,)
+        # plt.subplot(3,2,3)
+        # plt.imshow(featurecorr_deep_np_1) # plt.imshow(features_1_img_np,)
+        # plt.subplot(3,2,4)
+        # plt.imshow(features_2_img_np,)
+        # plt.subplot(3,2,5)
+        # plt.imshow(features_1[0][0][0].detach().cpu().numpy(),)
+        # plt.subplot(3,2,6)
+        # plt.imshow(features_2[0][0][0].detach().cpu().numpy(),)
+        # plt.show()
+        # plt.savefig('/home/ofrigo/reports/helliaus/img/feats_bt_aligned.png')
+        
+
+        #exit()
+
+        #### very experimental: make a rough prediction with only thermal or only rgb
+        if self.triple_decoder:
+            #features_1_single += features_1[:-4] + [torch.cat((features_1[-4], features_1[-4]), 1)]
+            #features_1_single += features_1[start_index:-1] + [torch.cat((features_1[-1], features_1[-1]), 1)]
+            decoder_output_1 = self.decoder_1(*features_1)
+            masks_1 = self.segmentation_head_1(decoder_output_1)
+            confidence_weight_1, _ = torch.max(torch.softmax(masks_1, dim=1), dim=1)
+            confidence_weight_1 = confidence_weight_1.unsqueeze(1)
+
+            #features = []
+            #features += features_1[:-4] + [torch.cat((features_2[-4], features_2[-4]), 1)]
+            #features += features_1[start_index:-1] + [torch.cat((features_2[-1], features_2[-1]), 1)]
+            decoder_output_2 = self.decoder_2(*features_2)
+            masks_2 = self.segmentation_head_2(decoder_output_2)
+            confidence_weight_2, _ = torch.max(torch.softmax(masks_2, dim=1), dim=1)
+            confidence_weight_2 = confidence_weight_2.unsqueeze(1)
+
+            confidence_weight_1_shallow = confidence_weight_1
+            confidence_weight_2_shallow = confidence_weight_1
+
+        else:
+            confidence_weight_1 = 1
+            confidence_weight_2 = 1
+            confidence_weight_1_shallow = 1
+            confidence_weight_2_shallow = 1
+            confidence_weight_1_deep = 1
+            confidence_weight_2_deep = 1
+
+            #features = []
+        
+        # concatenate third layer feats to retrieve high resolution details
+
+        #x4 = self.Att1(g=d5,x=x4)
+        #d5 = torch.cat((x4,d5),dim=1)        
+            
+        #features += features_1[:-4] + [torch.cat((features_1[-4], features_2[-4]), 1)] # original concatenation
+        #import pdb; pdb.set_trace()
+        features += features_1[:-4] + [torch.cat((confidence_weight_1_shallow * features_1[-4], confidence_weight_2_shallow * features_2[-4]), 1)] # original concatenation
+        #features += features_1[:-4] + [theta_shallow * torch.cat((features_1[-4], features_2[-4]), 1)] # concatenation with correlation weight
+
+        
+        # concatenate deep features from last encoder layer
+        #features += features_1[:-1] + [torch.cat((features_1[-1], features_2[-1]), 1)]
+
+        #features += features_1[start_index:-1] + [torch.cat((features_1[-1], features_2[-1]), 1)] # original concatenation
+        if self.triple_decoder:
+            confidence_weight_1_deep = F.interpolate(confidence_weight_1, size=features_2[-1].shape[2:], mode='bilinear', align_corners=True)
+            confidence_weight_2_deep = F.interpolate(confidence_weight_1, size=features_2[-1].shape[2:], mode='bilinear', align_corners=True)
+
+
+        features += features_1[start_index:-1] + [theta_deep * torch.cat((confidence_weight_1_deep * features_1[-1], confidence_weight_2_deep * features_2[-1]), 1)] # concatenation with correlation_weight
+
+        #import pdb; pdb.set_trace()
+        decoder_output = self.decoder(*features)
+
+        # fusion of high resolution images
+        concat_first_layer = False
+        if concat_first_layer:
+            x_fused = x
+            #import pdb; pdb.set_trace()
+            x_fused = self.image_fusion(x)
+            # upsample decoder_output
+            decoder_output = self.decoder_upsampling(decoder_output)
+            # concatenate 
+            decoder_output = torch.cat((decoder_output, x_fused), 1)
+            
+
+        masks = self.segmentation_head(decoder_output)
+
+        #lwir_aligned = torch.mean(F.interpolate(features_2[-4][:], size=features_2[0].shape[1:], mode='bilinear', align_corners=True),axis=1)[0]
+
+        # import matplotlib.pyplot as plt
+        # plt.subplot(2,3,1)
+        # plt.imshow(features_1[0][0][0].detach().cpu().numpy() + 0.5*masks_1.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,2)
+        # plt.imshow(features_1[0][0][0].detach().cpu().numpy() + 0.5*masks_2.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,3)
+        # plt.imshow(features_1[0][0][0].detach().cpu().numpy() + 0.5*masks.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,4)
+        # plt.imshow(lwir_aligned.detach().cpu().numpy() + 0.5*masks_1.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,5)
+        # plt.imshow(lwir_aligned.detach().cpu().numpy() + 0.5*masks_2.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,6)
+        # plt.imshow(lwir_aligned.detach().cpu().numpy() + 0.5*masks.argmax(1)[0].detach().cpu().numpy())
+
+        # plt.imshow(features_2[0][0][0].detach().cpu().numpy() + 0.5*masks_1.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,5)
+        # plt.imshow(features_2[0][0][0].detach().cpu().numpy() + 0.5*masks_2.argmax(1)[0].detach().cpu().numpy())
+        # plt.subplot(2,3,6)
+        # plt.imshow(features_2[0][0][0].detach().cpu().numpy() + 0.5*masks.argmax(1)[0].detach().cpu().numpy())
+
+        # #plt.show()
+        # #lwir_aligned = F.interpolate(features_2[-4][0][0], size=features_2[0][0][0].shape[1:], mode='bilinear', align_corners=True)
+        # plt.savefig('/home/ofrigo/reports/helliaus/img/feats_bt_aligned.png')
+        
+
+        if self.classification_head is not None:
+            labels = self.classification_head(features[-1])
+            return masks, labels
+        if self.triple_decoder:
+            masks_1 = F.interpolate(masks_1, size=features_1[0].shape[2:], mode='bilinear', align_corners=True)
+            masks_2 = F.interpolate(masks_1, size=features_2[0].shape[2:], mode='bilinear', align_corners=True)
+            return masks #, masks_1, masks_2
+
+        return masks #, masks_1, masks_2
+    
+
+    def predict(self, x):
+        """Inference method. Switch model to `eval` mode, call `.forward(x)` with `torch.no_grad()`
+
+        Args:
+            x: 4D torch tensor with shape (batch_size, channels, height, width)
+
+        Return:
+            prediction: 4D torch tensor with shape (batch_size, classes, height, width)
+
+        """
+        if self.training:
+            self.eval()
+
+        with torch.no_grad():
+            x = self.forward(x)
+
+        return x

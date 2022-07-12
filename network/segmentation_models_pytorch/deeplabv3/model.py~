@@ -1,0 +1,481 @@
+import torch.nn as nn
+import torch
+
+from typing import Optional
+from .decoder import DeepLabV3Decoder, DeepLabV3PlusDecoder
+from ..base import SegmentationModel, SegmentationModelDoubleEncoder, SegmentationHead, ClassificationHead
+from ..encoders import get_encoder
+
+
+class DeepLabV3(SegmentationModel):
+    """DeepLabV3_ implemetation from "Rethinking Atrous Convolution for Semantic Image Segmentation"
+    Args:
+        encoder_name: name of classification model (without last dense layers) used as feature
+                extractor to build segmentation model.
+        encoder_depth: number of stages used in decoder, larger depth - more features are generated.
+            e.g. for depth=3 encoder will generate list of features with following spatial shapes
+            [(H,W), (H/2, W/2), (H/4, W/4), (H/8, W/8)], so in general the deepest feature will have
+            spatial resolution (H/(2^depth), W/(2^depth)]
+        encoder_weights: one of ``None`` (random initialization), ``imagenet`` (pre-training on ImageNet).
+        decoder_channels: a number of convolution filters in ASPP module (default 256).
+        in_channels: number of input channels for model, default is 3.
+        classes: a number of classes for output (output shape - ``(batch, classes, h, w)``).
+        activation (str, callable): activation function used in ``.predict(x)`` method for inference.
+            One of [``sigmoid``, ``softmax2d``, callable, None]
+        upsampling: optional, final upsampling factor
+            (default is 8 to preserve input -> output spatial shape identity)
+        aux_params: if specified model will have additional classification auxiliary output
+            build on top of encoder, supported params:
+                - classes (int): number of classes
+                - pooling (str): one of 'max', 'avg'. Default is 'avg'.
+                - dropout (float): dropout factor in [0, 1)
+                - activation (str): activation function to apply "sigmoid"/"softmax" (could be None to return logits)
+    Returns:
+        ``torch.nn.Module``: **DeepLabV3**
+    .. _DeeplabV3:
+        https://arxiv.org/abs/1706.05587
+    """
+        
+    def __init__(
+            self,
+            encoder_name: str = "resnet34",
+            encoder_depth: int = 5,
+            encoder_weights: Optional[str] = "imagenet",
+            decoder_channels: int = 256,
+            in_channels: int = 3,
+            classes: int = 1,
+            activation: Optional[str] = None,
+            upsampling: int = 8,
+            aux_params: Optional[dict] = None,
+    ):
+        super().__init__()
+
+        self.encoder = get_encoder(
+            encoder_name,
+            in_channels=in_channels,
+            depth=encoder_depth,
+            weights=encoder_weights,
+        )
+        self.encoder.make_dilated(
+            stage_list=[4, 5],
+            dilation_list=[2, 4]
+        )
+
+        self.decoder = DeepLabV3Decoder(
+            in_channels=self.encoder.out_channels[-1],
+            out_channels=decoder_channels,
+        )
+
+        self.segmentation_head = SegmentationHead(
+            in_channels=self.decoder.out_channels,
+            out_channels=classes,
+            activation=activation,
+            kernel_size=1,
+            upsampling=upsampling,
+        )
+
+        if aux_params is not None:
+            self.classification_head = ClassificationHead(
+                in_channels=self.encoder.out_channels[-1], **aux_params
+            )
+        else:
+            self.classification_head = None
+
+
+class DeepLabV3Plus(SegmentationModel):
+    """DeepLabV3Plus_ implemetation from "Encoder-Decoder with Atrous Separable
+Convolution for Semantic Image Segmentation"
+    Args:
+        encoder_name: name of classification model (without last dense layers) used as feature
+                extractor to build segmentation model.
+        encoder_depth: number of stages used in decoder, larger depth - more features are generated.
+            e.g. for depth=3 encoder will generate list of features with following spatial shapes
+            [(H,W), (H/2, W/2), (H/4, W/4), (H/8, W/8)], so in general the deepest feature will have
+            spatial resolution (H/(2^depth), W/(2^depth)]
+        encoder_weights: one of ``None`` (random initialization), ``imagenet`` (pre-training on ImageNet).
+        encoder_output_stride: downsampling factor for deepest encoder features (see original paper for explanation)
+        decoder_atrous_rates: dilation rates for ASPP module (should be a tuple of 3 integer values)
+        decoder_channels: a number of convolution filters in ASPP module (default 256).
+        in_channels: number of input channels for model, default is 3.
+        classes: a number of classes for output (output shape - ``(batch, classes, h, w)``).
+        activation (str, callable): activation function used in ``.predict(x)`` method for inference.
+            One of [``sigmoid``, ``softmax2d``, callable, None]
+        upsampling: optional, final upsampling factor
+            (default is 8 to preserve input -> output spatial shape identity)
+        aux_params: if specified model will have additional classification auxiliary output
+            build on top of encoder, supported params:
+                - classes (int): number of classes
+                - pooling (str): one of 'max', 'avg'. Default is 'avg'.
+                - dropout (float): dropout factor in [0, 1)
+                - activation (str): activation function to apply "sigmoid"/"softmax" (could be None to return logits)
+    Returns:
+        ``torch.nn.Module``: **DeepLabV3Plus**
+    .. _DeeplabV3Plus:
+        https://arxiv.org/abs/1802.02611v3
+    """
+    def __init__(
+            self,
+            encoder_name: str = "resnet34",
+            encoder_depth: int = 5,
+            encoder_weights: Optional[str] = "imagenet",
+            encoder_output_stride: int = 16,
+            decoder_channels: int = 256,
+            decoder_atrous_rates: tuple = (12, 24, 36),
+            in_channels: int = 3,
+            classes: int = 1,
+            activation: Optional[str] = None,
+            upsampling: int = 4,
+            aux_params: Optional[dict] = None,
+    ):
+        super().__init__()
+
+        self.encoder = get_encoder(
+            encoder_name,
+            in_channels=in_channels,
+            depth=encoder_depth,
+            weights=encoder_weights,
+        )
+
+        if encoder_output_stride == 8:
+            self.encoder.make_dilated(
+                stage_list=[4, 5],
+                dilation_list=[2, 4]
+            )
+
+        elif encoder_output_stride == 16:
+            self.encoder.make_dilated(
+                stage_list=[5],
+                dilation_list=[2]
+            )
+        else:
+            raise ValueError(
+                "Encoder output stride should be 8 or 16, got {}".format(encoder_output_stride)
+            )
+
+        self.decoder = DeepLabV3PlusDecoder(
+            encoder_channels=self.encoder.out_channels,
+            out_channels=decoder_channels,
+            atrous_rates=decoder_atrous_rates,
+            output_stride=encoder_output_stride,
+        )
+
+        self.segmentation_head = SegmentationHead(
+            in_channels=self.decoder.out_channels,
+            out_channels=classes,
+            activation=activation,
+            kernel_size=1,
+            upsampling=upsampling,
+        )
+
+        if aux_params is not None:
+            self.classification_head = ClassificationHead(
+                in_channels=self.encoder.out_channels[-1], **aux_params
+            )
+        else:
+            self.classification_head = None
+
+
+#### modifications for rgb/thermal
+#### cnn geo
+
+import torch.nn.functional as F
+
+def featureL2Norm(feature):
+    epsilon = 1e-6
+    #        print(feature.size())
+    #        print(torch.pow(torch.sum(torch.pow(feature,2),1)+epsilon,0.5).size())
+    norm = torch.pow(torch.sum(torch.pow(feature,2),1)+epsilon,0.5).unsqueeze(1).expand_as(feature)
+    return torch.div(feature,norm)
+
+    
+class FeatureCorrelation(torch.nn.Module):
+    def __init__(self,shape='3D',normalization=True,matching_type='correlation'):
+        super(FeatureCorrelation, self).__init__()
+        self.normalization = normalization
+        self.matching_type=matching_type
+        self.shape=shape
+        self.ReLU = nn.ReLU()
+    
+    def forward(self, feature_A, feature_B):
+        b,c,h,w = feature_A.size()
+        if self.matching_type=='correlation':
+            if self.shape=='3D':
+                # reshape features for matrix multiplication
+                feature_A = feature_A.transpose(2,3).contiguous().view(b,c,h*w)
+                feature_B = feature_B.view(b,c,h*w).transpose(1,2)
+                # perform matrix mult.
+                feature_mul = torch.bmm(feature_B,feature_A)
+                # indexed [batch,idx_A=row_A+h*col_A,row_B,col_B]
+                correlation_tensor = feature_mul.view(b,h,w,h*w).transpose(2,3).transpose(1,2)
+            elif self.shape=='4D':
+                # reshape features for matrix multiplication
+                feature_A = feature_A.view(b,c,h*w).transpose(1,2) # size [b,c,h*w]
+                feature_B = feature_B.view(b,c,h*w) # size [b,c,h*w]
+                # perform matrix mult.
+                feature_mul = torch.bmm(feature_A,feature_B)
+                # indexed [batch,row_A,col_A,row_B,col_B]
+                correlation_tensor = feature_mul.view(b,h,w,h,w).unsqueeze(1)
+            
+            if self.normalization:
+                correlation_tensor = featureL2Norm(self.ReLU(correlation_tensor))
+        
+            return correlation_tensor
+
+        if self.matching_type=='subtraction':
+            return feature_A.sub(feature_B)
+        
+        if self.matching_type=='concatenation':
+            return torch.cat((feature_A,feature_B),1)
+
+class FeatureRegression(nn.Module):
+    def __init__(self, output_dim=6, use_cuda=True, batch_normalization=True, kernel_sizes=[7,5,5], channels=[225,128,64]):
+        super(FeatureRegression, self).__init__()
+        num_layers = len(kernel_sizes)
+        nn_modules = list()
+        for i in range(num_layers-1): # last layer is linear 
+            k_size = kernel_sizes[i]
+            ch_in = channels[i]
+            ch_out = channels[i+1]            
+            nn_modules.append(nn.Conv2d(ch_in, ch_out, kernel_size=k_size, padding=0))
+            if batch_normalization:
+                nn_modules.append(nn.BatchNorm2d(ch_out))
+            nn_modules.append(nn.ReLU(inplace=True))
+        self.conv = nn.Sequential(*nn_modules)        
+        #self.linear = nn.Linear(ch_out * kernel_sizes[-1] * kernel_sizes[-1], output_dim)
+        self.linear = nn.Linear(64*30*20, output_dim)
+        
+        if use_cuda:
+            self.conv.cuda()
+            self.linear.cuda()
+
+    def forward(self, x):
+        #import pdb; pdb.set_trace()
+        x = self.conv(x)
+        x = x.contiguous().view(x.size(0), -1)
+        x = self.linear(x)
+        return x        
+
+class FeatureWeighting(nn.Module):
+    def __init__(self, output_dim=6, use_cuda=True, batch_normalization=True, kernel_sizes=[7,5,5], channels=[225,128,64,1], paddings=[3,2,2,2]):
+        super(FeatureWeighting, self).__init__()
+        num_layers = len(kernel_sizes)
+        nn_modules = list()
+        for i in range(num_layers): # last layer is linear 
+            k_size = kernel_sizes[i]
+            ch_in = channels[i]
+            ch_out = channels[i+1]            
+            nn_modules.append(nn.Conv2d(ch_in, ch_out, kernel_size=k_size, padding=paddings[i]))
+            if batch_normalization:
+                nn_modules.append(nn.BatchNorm2d(ch_out))
+            nn_modules.append(nn.ReLU(inplace=True))
+        self.conv = nn.Sequential(*nn_modules)        
+        #self.linear = nn.Linear(ch_out * kernel_sizes[-1] * kernel_sizes[-1], output_dim)
+        #self.linear = nn.Linear(64*30*20, output_dim)
+        
+        if use_cuda:
+            self.conv.cuda()
+            #self.linear.cuda()
+
+    def forward(self, x):
+        #import pdb; pdb.set_trace()
+        x = self.conv(x)
+        #x = x.contiguous().view(x.size(0), -1)
+        #x = self.linear(x)
+        return x  
+
+class ImageFusionCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # self.convlayers = nn.Sequential(
+        #     nn.Conv2d(in_channels = 4, out_channels = 8, kernel_size = 9, stride = 1, padding = 4, dilation=2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(in_channels=8, out_channels=8, kernel_size = 3, stride = 1, padding= 4, dilation = 2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(in_channels=8, out_channels=4, kernel_size = 3, stride = 1, padding= 3, dilation = 2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(in_channels=4, out_channels=1, kernel_size = 3, stride = 1, padding= 3, dilation = 2),
+        #     nn.ReLU(),
+        # )
+        self.convlayers = nn.Sequential(
+            nn.Conv2d(in_channels = 4, out_channels = 1, kernel_size = 3, stride = 1, padding = 2, dilation=2),
+            nn.ReLU(),
+        )
+        self.activation = nn.Sigmoid()
+        
+    def forward(self,x):
+        x = self.convlayers(x)
+        x = self.activation(x)
+        return x
+
+
+class DeepLabV3PlusDoubleEncoder(SegmentationModelDoubleEncoder):
+    """DeepLabV3Plus_ implemetation from "Encoder-Decoder with Atrous Separable
+Convolution for Semantic Image Segmentation"
+    Args:
+        encoder_name: name of classification model (without last dense layers) used as feature
+                extractor to build segmentation model.
+        encoder_depth: number of stages used in decoder, larger depth - more features are generated.
+            e.g. for depth=3 encoder will generate list of features with following spatial shapes
+            [(H,W), (H/2, W/2), (H/4, W/4), (H/8, W/8)], so in general the deepest feature will have
+            spatial resolution (H/(2^depth), W/(2^depth)]
+        encoder_weights: one of ``None`` (random initialization), ``imagenet`` (pre-training on ImageNet).
+        encoder_output_stride: downsampling factor for deepest encoder features (see original paper for explanation)
+        decoder_atrous_rates: dilation rates for ASPP module (should be a tuple of 3 integer values)
+        decoder_channels: a number of convolution filters in ASPP module (default 256).
+        in_channels: number of input channels for model, default is 3.
+        classes: a number of classes for output (output shape - ``(batch, classes, h, w)``).
+        activation (str, callable): activation function used in ``.predict(x)`` method for inference.
+            One of [``sigmoid``, ``softmax2d``, callable, None]
+        upsampling: optional, final upsampling factor
+            (default is 8 to preserve input -> output spatial shape identity)
+        aux_params: if specified model will have additional classification auxiliary output
+            build on top of encoder, supported params:
+                - classes (int): number of classes
+                - pooling (str): one of 'max', 'avg'. Default is 'avg'.
+                - dropout (float): dropout factor in [0, 1)
+                - activation (str): activation function to apply "sigmoid"/"softmax" (could be None to return logits)
+    Returns:
+        ``nn.Module``: **DeepLabV3Plus**
+    .. _DeeplabV3Plus:
+        https://arxiv.org/abs/1802.02611v3
+    """
+    def __init__(
+            self,
+            encoder_name: str = "resnet34",
+            encoder_depth: int = 5,
+            encoder_weights: Optional[str] = "imagenet",
+            encoder_output_stride: int = 16,
+            decoder_channels: int = 256,
+            decoder_atrous_rates: tuple = (12, 24, 36),
+            in_channels: int = 3,
+            classes: int = 1,
+            activation: Optional[str] = None,
+            upsampling: int = 4,
+            aux_params: Optional[dict] = None,
+            correlation_weight = True,
+            confidence_weight = True,
+    ):
+        super(DeepLabV3PlusDoubleEncoder, self).__init__()
+
+        self.triple_decoder = confidence_weight
+        self.correlation_weight = correlation_weight
+        
+        self.encoder_1 = get_encoder(
+            encoder_name,
+            in_channels=in_channels,
+            depth=encoder_depth,
+            weights=encoder_weights,
+        )
+
+        self.encoder_2 = get_encoder(
+            encoder_name,
+            in_channels=in_channels,
+            depth=encoder_depth,
+            weights=encoder_weights,
+        )
+
+
+        if encoder_output_stride == 8:
+            self.encoder_1.make_dilated(
+                stage_list=[4, 5],
+                dilation_list=[2, 4]
+            )
+            self.encoder_2.make_dilated(
+                stage_list=[4, 5],
+                dilation_list=[2, 4]
+            )
+
+
+        elif encoder_output_stride == 16:
+            self.encoder_1.make_dilated(
+                stage_list=[5],
+                dilation_list=[2]
+            )
+            self.encoder_2.make_dilated(
+                stage_list=[5],
+                dilation_list=[2]
+            )
+
+        else:
+            raise ValueError(
+                "Encoder output stride should be 8 or 16, got {}".format(encoder_output_stride)
+            )
+
+        encoder_out_channels = []
+        # get channel size after deep feature concatenation
+        start_index = -3
+        #start_index = 0
+        encoder_out_channels += list(self.encoder_1.out_channels[:-4]) + [self.encoder_1.out_channels[-4]*2]
+        encoder_out_channels += list(self.encoder_1.out_channels[start_index:-1]) + [self.encoder_1.out_channels[-1]*2]
+        encoder_out_channels = tuple(encoder_out_channels)
+
+        # first layer concatenation in decoder
+        concat_first_layer = False
+        if concat_first_layer:
+            concat_channels = 1
+            upsampling = 0
+        else:
+            concat_channels = 0
+           
+
+        self.decoder = DeepLabV3PlusDecoder(
+            encoder_channels=encoder_out_channels,
+            out_channels=decoder_channels,
+            atrous_rates=decoder_atrous_rates,
+            output_stride=encoder_output_stride,
+        )
+
+        if self.triple_decoder:
+            self.decoder_1 = DeepLabV3PlusDecoder(
+                encoder_channels=self.encoder_1.out_channels,
+                out_channels=decoder_channels,
+                atrous_rates=decoder_atrous_rates,
+                output_stride=encoder_output_stride,
+            )
+            self.decoder_2 = DeepLabV3PlusDecoder(
+                encoder_channels=self.encoder_2.out_channels,
+                out_channels=decoder_channels,
+                atrous_rates=decoder_atrous_rates,
+                output_stride=encoder_output_stride,
+            )
+
+        # hacked layers for feature concatenation
+        #self.image_fusion = ImageFusionCNN()
+        #self.decoder_upsampling = nn.UpsamplingBilinear2d(scale_factor=4)
+        self.fc = FeatureCorrelation(shape='3D')        
+        self.fw_deep = FeatureWeighting(9, channels=[1200,300,64,1])
+        self.fw_shallow = FeatureWeighting(9, channels=[1200*4,300,64,1])
+
+        #self.fr = FeatureRegression(12, channels=[1200,300,64])
+
+
+        self.segmentation_head = SegmentationHead(
+            in_channels=self.decoder.out_channels + concat_channels,
+            out_channels=classes,
+            activation=activation,
+            kernel_size=1,
+            upsampling=upsampling,
+        )
+        
+        if self.triple_decoder:
+            self.segmentation_head_1 = SegmentationHead(
+                in_channels=self.decoder.out_channels,
+                out_channels=classes,
+                activation=activation,
+                kernel_size=1,
+                upsampling=1,
+            )
+            self.segmentation_head_2 = SegmentationHead(
+                in_channels=self.decoder.out_channels,
+                out_channels=classes,
+                activation=activation,
+                kernel_size=1,
+                upsampling=1,
+            )
+
+        if aux_params is not None:
+            self.classification_head = ClassificationHead(
+                in_channels=encoder_out_channels[-1], **aux_params
+            )
+        else:
+            self.classification_head = None
