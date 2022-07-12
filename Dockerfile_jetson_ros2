@@ -1,0 +1,25 @@
+# https://ngc.nvidia.com/catalog/containers/nvidia:l4t-pytorch
+
+#FROM  nvcr.io/nvidia/l4t-pytorch:r32.6.1-pth1.9-py3
+
+FROM dustynv/ros:foxy-ros-base-l4t-r32.6.1 
+
+RUN apt-get update -y && \
+    apt-get install -y python3-pip python-dev lsb-release curl gnupg2 python3-tk libopenblas-dev
+
+# copy project
+COPY . /root/.
+WORKDIR /root/
+
+# In case of further dev, add libraries here
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
+#RUN pip3 install --no-cache-dir ipython jedi==0.17.2 
+#RUN pip3 install --no-cache-dir opencv-python #tqdm flask
+
+#RUN apt-get install libcblas-dev libatlas-base-dev
+
+RUN pip3 install -r requirements_jetson.txt
+
+# ENTRYPOINT ["python3", "demo_web.py"]
+
+
