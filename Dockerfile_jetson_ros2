@@ -20,6 +20,9 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
 RUN pip3 install -r requirements_jetson.txt
 
+# download torch .pth model 
+RUN mkdir model_weights && cd model_weights && gdown --id 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa
+
 # ENTRYPOINT ["python3", "demo_web.py"]
 
 

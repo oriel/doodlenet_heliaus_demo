@@ -11,16 +11,18 @@ git clone https://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@github.com/oriel/dood
 ## a) Build for PC
 
 ```
-docker build -f Dockerfile_pc_ros2 -t "doodlenet_ros2:pc" .
+docker build -f Dockerfile_pc_ros2 -t "doodlenet_ros2:beta" .
 ```
 
 ## b) Build for jetson (will only work if building from a jetson)
 
 ```
-docker build -f Dockerfile_jetson_ros2  -t "doodlenet_ros2:jetson" .
+docker build -f Dockerfile_jetson_ros2  -t "doodlenet_ros2:beta" .
 ```
 
-# 2) Run docker image (run this bash script to allow gpu usage, host network, X graphic server):
+# 2) Run docker image:
+
+Run this bash script to allow gpu usage, host network, X graphic server:
 
 ```
 bash runDocker.sh
