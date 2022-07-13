@@ -5,9 +5,9 @@ RUN apt-get update -y && \
 
 WORKDIR /app
 
-RUN pip install -r requirements_pc.txt
-
 COPY . /app
+
+RUN pip install -r requirements_pc.txt
 
 # download torch .pth model 
 RUN cd model_weights && gdown --id 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa
