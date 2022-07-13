@@ -3,13 +3,7 @@ import torch.nn as nn
 from . import initialization as init
 
 import torch.nn.functional as F
-
 import torch.multiprocessing as mp
-
-import matplotlib.pyplot as plt
-
-global zi
-zi = 0
 
 class SegmentationModel(torch.nn.Module):
 
@@ -73,7 +67,7 @@ class SegmentationModelDoubleEncoder(torch.nn.Module):
             self.out_2 = features_i, decoder_output_i, masks_i, confidence_weight_i
 
 
-    def forward(self, x, debug_viz=False, parallel_pipe=False):
+    def forward(self, x, parallel_pipe=False):
         """Sequentially pass `x` trough model`s encoder, decoder and heads"""
 
         x_1 = x[:,:3] # rgb image
@@ -181,51 +175,6 @@ class SegmentationModelDoubleEncoder(torch.nn.Module):
 
         masks = self.segmentation_head(decoder_output)
 
-        if debug_viz:
-            features_1_img = torch.mean(features_1[-4], axis=1)
-            features_1_img_np = features_1_img[0].detach().cpu().numpy()
-            features_2_img = torch.mean(features_2[-4], axis=1)
-            features_2_img_np = features_2_img[0].detach().cpu().numpy()
-            features_1_img_deep = torch.mean(features_1[-1], axis=1)
-            features_1_img_np_deep = features_1_img_deep[0].detach().cpu().numpy()
-            features_2_img_deep = torch.mean(features_2[-1], axis=1)
-            features_2_img_np_deep = features_2_img_deep[0].detach().cpu().numpy()
-
-            features_1_img_deep_w = torch.mean(theta_deep*confidence_weight_1_deep*features_1[-1], axis=1)
-            features_1_img_np_deep_w = features_1_img_deep_w[0].detach().cpu().numpy()
-            features_2_img_deep_w = torch.mean(theta_deep*confidence_weight_1_deep*features_2[-1], axis=1)
-            features_2_img_np_deep_w = features_2_img_deep_w[0].detach().cpu().numpy()
-
-            fig = plt.figure()
-
-            plt.subplot(3,2,1)
-            plt.imshow(features_1[0][0][:3].permute(1,2,0).detach().cpu().numpy())
-            plt.subplot(3,2,2)
-            plt.imshow(features_2[0][0][0].detach().cpu().numpy(),cmap='gray')
-
-            plt.subplot(3,2,3)
-            plt.imshow(features_1_img_np_deep,)
-            plt.subplot(3,2,4)
-            plt.imshow(features_2_img_np_deep,)
-            plt.subplot(3,2,5)
-
-            # plt.imshow(theta_deep[0][0].detach().cpu().numpy()) # plt.imshow(features_1_img_np,)
-            # plt.subplot(3,2,4)
-            # plt.imshow(confidence_weight_2[0][0].detach().cpu().numpy())
-            # plt.subplot(3,2,5)
-
-            plt.imshow(features_1_img_np_deep_w) # plt.imshow(features_1_img_np,)
-            plt.subplot(3,2,6)
-            plt.imshow(features_2_img_np_deep_w)
-
-            #plt.show()
-            #plt.pause(.0000001) # Delay in seconds
-            #fig.canvas.draw() # Draws the image to the screen
-            #plt.close()
-
-            global zi
-            plt.savefig(f'/home/ofrigo/debug_improved{zi:05}.png')
-            zi+=1
         
         if self.classification_head is not None:
             labels = self.classification_head(features[-1])

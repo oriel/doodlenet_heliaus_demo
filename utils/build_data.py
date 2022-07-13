@@ -2,7 +2,6 @@ from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
 from PIL import Image
 from PIL import ImageFilter
-import pandas as pd
 import numpy as np
 import torch
 import torchvision

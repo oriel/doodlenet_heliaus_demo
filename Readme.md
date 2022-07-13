@@ -20,7 +20,7 @@ cd doodlenet_heliaus_demo
 docker build -f Dockerfile_pc_ros2 -t "doodlenet_ros2:beta" .
 ```
 
-## b) Build for jetson (will only work if building from a jetson)
+## b) Build for jetson (will only work if building from a jetson - L4T 32.6.1 [ JetPack 4.6 ])
 
 ```
 docker build -f Dockerfile_jetson_ros2  -t "doodlenet_ros2:beta" .
