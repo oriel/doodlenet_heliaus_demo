@@ -2,11 +2,17 @@
 
 # 0) Clone the private git repo
 
-```sh
+```
 git clone https://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@github.com/oriel/doodlenet_heliaus_demo.git
 ```
 
 # 1) Build docker image
+
+Go to the path of the cloned repository:
+
+```
+cd doodlenet_heliaus_demo
+```
 
 ## a) Build for PC
 
