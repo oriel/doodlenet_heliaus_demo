@@ -146,7 +146,7 @@ class ImageSubscriberInference(Node):
     
 def get_args():
  
-    parser = argparse.ArgumentParser(description='Perform semantic segmentation on heliaus test data, generates a video demo')
+    parser = argparse.ArgumentParser(description='Perform semantic segmentation on heliaus test data, generates a video demo', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--gpu', default=0, type=int)
     parser.add_argument("--checkpoint", type=str, default='model_weights/DeepLabV3PlusDoubleEncoder_confidence_mobilenet_debugged_seed_42_finetune_same_checkpoint.pth')
     parser.add_argument('--backbone', default="mobilenet_v2", type=str, help='Name of the backbone to be used with the model (resnet101, resnet34)')
@@ -157,7 +157,9 @@ def get_args():
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument('--rgb_topic', default="source_images_rgb", type=str, help='Name of RGB video stream ROS2 topic')
-    parser.add_argument('--lwir_topic', default="source_images_lwir", type=str, help='Name of RGB video stream ROS2 topic')        
+    parser.add_argument('--lwir_topic', default="source_images_lwir", type=str, help='Name of LWIR video stream ROS2 topic')
+    parser.add_argument('--display', action='store_true', help='Display output frames with opencv (only works from local terminal supporting graphical server)')
+
 
     args = parser.parse_args()
     return args
@@ -200,9 +202,10 @@ def main(args):
     #model.load_state_dict(torch.load(args.checkpoint, strict=False))
     print("Loaded model: {}".format(args.checkpoint))
 
-    #### if asekd, compute model flops and parameters
+    #### if asked, compute model flops and parameters, then exit
     if args.show_complexity:
         print_model_complexity(model, args.model, args.backbone, rgbt, device)
+        exit()
 
     colormap = create_heliaus_label_colormap()
 
@@ -215,7 +218,7 @@ def main(args):
     print(f'Starting ROS2 subscriber')
     print(f'Waiting for image messages at topics {args.rgb_topic} , {args.lwir_topic}')
 
-    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic)
+    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic, display_cv2=args.display)
    
     # Spin the node so the callback function is called.
     rclpy.spin(image_subscriber)

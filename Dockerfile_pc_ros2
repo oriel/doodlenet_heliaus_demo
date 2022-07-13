@@ -10,4 +10,4 @@ COPY . /app
 RUN pip install -r requirements_pc.txt
 
 # download torch .pth model 
-RUN mkdir model_weights && cd model_weights && gdown --id 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa
+RUN mkdir model_weights && cd model_weights && gdown 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa

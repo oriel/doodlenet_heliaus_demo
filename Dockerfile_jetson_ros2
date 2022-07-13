@@ -5,18 +5,16 @@
 FROM dustynv/ros:foxy-ros-base-l4t-r32.6.1 
 
 RUN apt-get update -y && \
-    apt-get install -y python3-pip python-dev lsb-release curl gnupg2 python3-tk libopenblas-dev
+    apt-get install -y python3-pip python-dev lsb-release curl gnupg2 python3-tk libopenblas-dev wget
 
 # copy project
-COPY . /root/.
-WORKDIR /root/
+COPY . /app/.
+WORKDIR /app/
 
 # In case of further dev, add libraries here
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
-#RUN pip3 install --no-cache-dir ipython jedi==0.17.2 
-#RUN pip3 install --no-cache-dir opencv-python #tqdm flask
 
-#RUN apt-get install libcblas-dev libatlas-base-dev
+RUN wget -O torch-1.10.0-cp36-cp36m-linux_aarch64.whl https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl
 
 RUN pip3 install -r requirements_jetson.txt
 
@@ -24,5 +22,3 @@ RUN pip3 install -r requirements_jetson.txt
 RUN mkdir model_weights && cd model_weights && gdown --id 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa
 
 # ENTRYPOINT ["python3", "demo_web.py"]
-
-
