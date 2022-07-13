@@ -1,0 +1,16 @@
+FROM osrf/ros:foxy-desktop
+
+RUN apt-get update -y && \
+    apt-get install -y python3-pip python-dev python3-opencv lsb-release curl gnupg2 python3-tk
+
+# We copy just the requirements.txt first to leverage Docker cache
+COPY ./requirements.txt /app/requirements.txt
+
+WORKDIR /app
+
+RUN pip install -r requirements_pc.txt
+
+COPY . /app
+
+# download torch .pth model 
+RUN cd model_weights && gdown --id 1ooz2HL0Fjrk9hl8Z6-_k_6jQqH2_LOaa

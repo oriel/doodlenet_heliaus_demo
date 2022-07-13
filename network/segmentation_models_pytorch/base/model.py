@@ -61,7 +61,6 @@ class SegmentationModelDoubleEncoder(torch.nn.Module):
             init.initialize_head(self.classification_head)
 
     def encoder_decoder_pipe(self, x, encoder, decoder, seg_head, num_head):
-        print(f"calling head {num_head}")
         features_i = encoder(x)
         decoder_output_i = decoder(*features_i)
         masks_i = seg_head(decoder_output_i)
@@ -72,7 +71,6 @@ class SegmentationModelDoubleEncoder(torch.nn.Module):
             self.out_1 = features_i, decoder_output_i, masks_i, confidence_weight_i
         elif num_head == 2:
             self.out_2 = features_i, decoder_output_i, masks_i, confidence_weight_i
-        print(f"finished head {num_head}")
 
 
     def forward(self, x, debug_viz=False, parallel_pipe=False):

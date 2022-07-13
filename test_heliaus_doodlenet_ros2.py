@@ -213,6 +213,8 @@ def main(args):
    
     # Create the node
     print(f'Starting ROS2 subscriber')
+    print(f'Waiting for image messages at topics {args.rgb_topic} , {args.lwir_topic}')
+
     image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic)
    
     # Spin the node so the callback function is called.
