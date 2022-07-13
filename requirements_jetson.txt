@@ -34,3 +34,5 @@ timm==0.5.4
 opencv-python==4.5.5.64
 # pip update:
 #pip-21.3.1 setuptools-59.6.0
+gdown
+thop

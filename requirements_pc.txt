@@ -46,3 +46,4 @@ pycocotools==2.0.4
 lmdb==1.3.0
 pretrainedmodels
 gdown
+thop
