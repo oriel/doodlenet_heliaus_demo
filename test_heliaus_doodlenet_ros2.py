@@ -93,7 +93,8 @@ class ImageSubscriberInference(Node):
     """
     Takes as input a ROS2 image message data, returns a torch tensor and a opencv/numpy array.
     """
-    cv_frame = self.br.imgmsg_to_cv2(data)
+    cv_frame = self.br.imgmsg_to_cv2(data,desired_encoding="rgb8")
+    print("IMAGE SHAPE:" + cv_frame.shape)
     x_pil = frame_to_pil(cv_frame)
     tx = TF.to_tensor(x_pil).unsqueeze(0).to(self.device)
     return tx, cv_frame
@@ -107,6 +108,8 @@ class ImageSubscriberInference(Node):
       
     # Convert ROS Image message to torch and OpenCV image
     try:
+      print("IN_INFERENCE")
+      print("data_RGB Type" + data_rgb)	
       tx_rgb, cv_frame_rgb = self.ros_to_tensor(data_rgb)
       tx_lwir, cv_frame_lwir = self.ros_to_tensor(data_lwir)
     except:
