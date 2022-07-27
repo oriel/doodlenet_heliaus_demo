@@ -2,7 +2,12 @@
 
 # Docker configuration
 
-Docker should be configured to be able to access the GPU throught nvidia containers. If docker is not yet configured, do the configuration with the following command:
+Docker should be configured to be able to access the GPU throught nvidia-containers. 
+To install nvidia-container-runtime:
+```
+sudo apt-get install nvidia-container-runtime
+```
+If docker is not yet configured to use nvidia-container-runtime, it can be done with:
 
 ```
 sudo tee /etc/docker/daemon.json <<EOF
