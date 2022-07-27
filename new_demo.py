@@ -99,8 +99,8 @@ class ImageSubscriberInference(Node):
        if data.encoding == 'mono16':
           cv_image = (cv_image/256).astype('uint8')
        cv_image_8bits = cv2.merge((cv_image,cv_image,cv_image))    
-    if data.encoding == 'yuv422':
-       cv_image_8bits =self.br.imgmsg_to_cv2(data, desired_encoding='rgb8')
+    if data.encoding == 'yuv422' or data.encoding == 'rgb8' or data.encoding == 'bgr8':
+       cv_image_8bits = self.br.imgmsg_to_cv2(data, desired_encoding='rgb8')
     #print(f("IMAGE SHAPE"))
     #x_pil = frame_to_pil(cv_image_8bits)
     # print("cv.shape[0]: " str(cv_image_8bits.shape[0]))
@@ -147,6 +147,9 @@ class ImageSubscriberInference(Node):
     logits = self.model(txy)
     logits = F.interpolate(logits, size=tx_rgb.shape[2:], mode='bilinear', align_corners=True)
     prob, max_logits = torch.max(torch.softmax(logits, dim=1), dim=1)
+    
+    # filter out non-pedestrian classes                                                                                                                                                       
+    max_logits[max_logits != 2] = 0
 
     # apply color map to predictions
     predicted_frame = (color_map(max_logits[0].cpu().numpy(), self.colormap))
