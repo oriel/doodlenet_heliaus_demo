@@ -1,5 +1,31 @@
 # Jetson / PC demo
 
+# Docker configuration
+
+Docker should be configured to be able to access the GPU throught nvidia containers. If docker is not yet configured, do the configuration with the following command:
+
+```
+sudo tee /etc/docker/daemon.json <<EOF
+{
+    "runtimes": {
+        "nvidia": {
+            "path": "/usr/bin/nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+EOF
+```
+
+Then restart docker service:
+
+```
+ sudo systemctl daemon-reload
+ sudo systemctl restart docker
+``` 
+
+# Building and installation instructions
+
 # 0) Clone the private git repo
 
 ```
@@ -43,10 +69,10 @@ python3 test_heliaus_doodlenet_ros2.py
 # 3.1) Running ros2 demo with custom ROS2 topics for input cameras
 
 Note that the demo with default parameters use "source_images_rgb" and "source_images_lwir" as input ROS2 topics.
-You may use custom input topics with:
+You may use custom input topics for the Autosens demo with:
 
 ```
-python3 test_heliaus_doodlenet_ros2.py --rgb_topic custom_rgb_cam --lwir_topic custom_lwir_cam 
+python3 test_heliaus_doodlenet_ros2.py --rgb_topic /camera/flea/left/aligned --lwir_topic /camera/smartIR640/cam_0008/ir_frame_enhanced/recified
 ```
 
 You may check other available customisable parameters with:
