@@ -3,6 +3,9 @@ FROM osrf/ros:foxy-desktop
 RUN apt-get update -y && \
     apt-get install -y python3-pip python-dev python3-opencv lsb-release curl gnupg2 python3-tk
 
+# We copy just the requirements.txt first to leverage Docker cache
+COPY ./requirements_pc.txt /app/requirements_pc.txt
+
 WORKDIR /app
 
 COPY . /app
