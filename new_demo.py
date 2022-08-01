@@ -21,7 +21,7 @@ class ImageSubscriberInference(Node):
   """
   Create an ImageSubscriberInference class, which is a subclass of the Node class.
   """
-  def __init__(self, model, device, colormap, rgb_topic='source_images_rgb', lwir_topic='source_images_lwir', display_cv2=False):
+  def __init__(self, model, device, colormap, rgb_topic='source_images_rgb', lwir_topic='source_images_lwir', display_cv2=False, write_cv2=False):
     """
     Class constructor to set up the node
     """
@@ -57,6 +57,10 @@ class ImageSubscriberInference(Node):
 
     self.publisher_ = self.create_publisher(Image, 'doodlenet_output', 10)
     self.display_cv2 = display_cv2
+
+    self.write_cv2 = write_cv2
+    if write_cv2 != '':
+      self.out_video = cv2.VideoWriter(write_cv2, cv2.VideoWriter_fourcc('M','J','P','G'), 30, (640, 480))
 
 
   def listener_callback_rgb(self, data):
@@ -169,6 +173,9 @@ class ImageSubscriberInference(Node):
         cv2.imshow(f"Demo", out_frame)     
         cv2.waitKey(1)
 
+    if self.write_cv2 != '':
+      self.out_video.write(out_frame)
+
     
 def get_args():
  
@@ -185,6 +192,8 @@ def get_args():
     parser.add_argument('--rgb_topic', default="source_images_rgb", type=str, help='Name of RGB video stream ROS2 topic')
     parser.add_argument('--lwir_topic', default="source_images_lwir", type=str, help='Name of LWIR video stream ROS2 topic')
     parser.add_argument('--display', action='store_true', help='Display output frames with opencv (only works from local terminal supporting graphical server)')
+    parser.add_argument('--write', default='', help='Write output frames in given video file')
+
 
 
     args = parser.parse_args()
@@ -244,7 +253,7 @@ def main(args):
     print(f'Starting ROS2 subscriber')
     print(f'Waiting for image messages at topics {args.rgb_topic} , {args.lwir_topic}')
 
-    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic, display_cv2=args.display)
+    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic, display_cv2=args.display, write_cv2=args.write)
    
     # Spin the node so the callback function is called.
     rclpy.spin(image_subscriber)
