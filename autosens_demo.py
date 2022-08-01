@@ -21,7 +21,7 @@ class ImageSubscriberInference(Node):
   """
   Create an ImageSubscriberInference class, which is a subclass of the Node class.
   """
-  def __init__(self, model, device, colormap, rgb_topic='source_images_rgb', lwir_topic='source_images_lwir', display_cv2=False, write_cv2=False):
+  def __init__(self, model, device, colormap, rgb_topic='source_images_rgb', lwir_topic='source_images_lwir', display_cv2=False, write_cv2=False, verbose=False):
     """
     Class constructor to set up the node
     """
@@ -61,13 +61,14 @@ class ImageSubscriberInference(Node):
     self.write_cv2 = write_cv2
     if write_cv2 != '':
       self.out_video = cv2.VideoWriter(write_cv2, cv2.VideoWriter_fourcc('M','J','P','G'), 30, (640, 480))
-
+    self.verbose = verbose
 
   def listener_callback_rgb(self, data):
     """
     Callback function for rgb stream.
     """
-    self.get_logger().info('Receiving RGB video frame')
+    if self.verbose:
+      self.get_logger().info('Receiving RGB video frame')
     self.received_rgb = True
     self.data_rgb = data
     self.sync_streams()
@@ -76,7 +77,8 @@ class ImageSubscriberInference(Node):
     """
     Callback function for lwir stream.
     """
-    self.get_logger().info('Receiving LWIR video frame')
+    if self.verbose:
+      self.get_logger().info('Receiving LWIR video frame')
     self.received_lwir = True
     self.data_lwir = data
     self.sync_streams()
@@ -98,19 +100,16 @@ class ImageSubscriberInference(Node):
     Takes as input a ROS2 image message data, returns a torch tensor and a opencv/numpy array.
     """
     cv_image = self.br.imgmsg_to_cv2(data, desired_encoding='passthrough')
-    print("MSG_ENCODING: " + data.encoding)
+    if self.verbose:
+      print("MSG_ENCODING: " + data.encoding)
     if data.encoding == 'mono16' or data.encoding =='mono8' :
        if data.encoding == 'mono16':
           cv_image = (cv_image/256).astype('uint8')
        cv_image_8bits = cv2.merge((cv_image,cv_image,cv_image))    
     if data.encoding == 'yuv422' or data.encoding == 'rgb8' or data.encoding == 'bgr8':
        cv_image_8bits = self.br.imgmsg_to_cv2(data, desired_encoding='rgb8')
-    #print(f("IMAGE SHAPE"))
-    #x_pil = frame_to_pil(cv_image_8bits)
-    # print("cv.shape[0]: " str(cv_image_8bits.shape[0]))
     if cv_image_8bits.shape[0] > 480:
        cv_image_8bits = cv2.resize(cv_image_8bits,(640,480))
-       print("in the if")	
     
     x_pil = frame_to_pil(cv_image_8bits)
     tx = TF.to_tensor(x_pil).unsqueeze(0).to(self.device)
@@ -126,25 +125,16 @@ class ImageSubscriberInference(Node):
       
     # Convert ROS Image message to torch and OpenCV image
     tx_rgb, cv_frame_rgb = self.ros_to_tensor(data_rgb)
-    print("RGB processed")
-    tx_lwir, cv_frame_lwir = self.ros_to_tensor(data_lwir) 
-    print("LWIR  processed")
-    try:
-      print("IN_RGB")
-      #tx_rgb, cv_frame_rgb = self.ros_to_tensor(data_rgb)
-      print("IN_LWIR")
-      #tx_lwir, cv_frame_lwir = self.ros_to_tensor(data_lwir)
-    except:
-      print('Error: not possible to read video stream')
-      return None
-
+    if self.verbose:
+      print("RGB processed")
+    tx_lwir, cv_frame_lwir = self.ros_to_tensor(data_lwir)
+    if self.verbose:
+      print("LWIR processed")
     # thermal: 3 channels to 1 channel
     if tx_lwir.shape[1] > 1:
       tx_lwir = tx_lwir[:,0,:,:].unsqueeze(0).to(self.device)
 
     # concatenate RGB and LWIR
-    print("Shape LWIR"  + str(tx_lwir.shape))
-    print("Shape RGB"  + str(tx_rgb.shape))	
     txy = torch.cat((tx_rgb, tx_lwir), 1)
 
     # compute model predictions
@@ -152,7 +142,7 @@ class ImageSubscriberInference(Node):
     logits = F.interpolate(logits, size=tx_rgb.shape[2:], mode='bilinear', align_corners=True)
     prob, max_logits = torch.max(torch.softmax(logits, dim=1), dim=1)
     
-    # filter out non-pedestrian classes                                                                                                                                                       
+    # filter out non-pedestrian classes                                                                                                                                                      
     max_logits[max_logits != 2] = 0
 
     # apply color map to predictions
@@ -163,10 +153,11 @@ class ImageSubscriberInference(Node):
 
     # publish result for external ros-based visualization
     self.publisher_.publish(self.br.cv2_to_imgmsg(out_frame, encoding="rgb8"))
-    self.get_logger().info('Publishing video frame output')
+    if self.verbose:
+      self.get_logger().info('Publishing video frame output')
 
     fps = int(1.0/(time.time() - start_time))
-    print(f"Demo speed: {fps}")
+    print(f"Demo speed: {fps} fps")
      
     # Display image by opencv if asked
     if self.display_cv2:
@@ -189,10 +180,11 @@ def get_args():
     parser.add_argument('--show_complexity', action='store_true', help='Show numbers of params and flops')
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
-    parser.add_argument('--rgb_topic', default="source_images_rgb", type=str, help='Name of RGB video stream ROS2 topic')
-    parser.add_argument('--lwir_topic', default="source_images_lwir", type=str, help='Name of LWIR video stream ROS2 topic')
+    parser.add_argument('--rgb_topic', default="/camera/flea/left/aligned", type=str, help='Name of RGB video stream ROS2 topic')
+    parser.add_argument('--lwir_topic', default="/camera/smartIR640/cam_0008/ir_frame_enhanced/rectified", type=str, help='Name of LWIR video stream ROS2 topic')
     parser.add_argument('--display', action='store_true', help='Display output frames with opencv (only works from local terminal supporting graphical server)')
     parser.add_argument('--write', default='', help='Write output frames in given video file')
+    parser.add_argument('--verbose', action='store_true', help='Display ros2 logs and some debugging info')
 
 
 
@@ -253,7 +245,7 @@ def main(args):
     print(f'Starting ROS2 subscriber')
     print(f'Waiting for image messages at topics {args.rgb_topic} , {args.lwir_topic}')
 
-    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic, display_cv2=args.display, write_cv2=args.write)
+    image_subscriber = ImageSubscriberInference(model, device, colormap, rgb_topic=args.rgb_topic, lwir_topic=args.lwir_topic, display_cv2=args.display, write_cv2=args.write, verbose=args.verbose)
    
     # Spin the node so the callback function is called.
     rclpy.spin(image_subscriber)
