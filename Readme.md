@@ -68,7 +68,7 @@ bash runDocker.sh
 # 3) Running ros2 demo inside docker image
 
 ```
-python3 test_heliaus_doodlenet_ros2.py
+python3 autosens_demo.py
 ```
 
 # 3.1) Running ros2 demo with custom ROS2 topics for input cameras
@@ -77,12 +77,12 @@ Note that the demo with default parameters use "source_images_rgb" and "source_i
 You may use custom input topics for the Autosens demo with:
 
 ```
-python3 test_heliaus_doodlenet_ros2.py --rgb_topic /camera/flea/left/aligned --lwir_topic /camera/smartIR640/cam_0008/ir_frame_enhanced/recified
+python3 autosens_demo.py --rgb_topic /camera/flea/left/aligned --lwir_topic /camera/smartIR640/cam_0008/ir_frame_enhanced/recified
 ```
 
 You may check other available customisable parameters with:
 
 ```
-python3 test_heliaus_doodlenet_ros2.py --help
+python3 autosens_demo.py --help
 ```
 
